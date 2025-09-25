@@ -1,0 +1,21 @@
+// Pseudocode: read serial E:value, compute steering PWM
+float e = 0;
+unsigned long lastMicros = 0;
+void loop() {
+  if (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    if (line.startsWith("E:")) {
+      e = line.substring(2).toFloat();
+    } else if (line.startsWith("LOST")) {
+      // handle lost: slow search
+    }
+  }
+  if (millis() - lastLoopMs >= Ts_ms) {
+    float control = pid_compute(e); // returns steering command -1..1
+    // convert to left/right pwm
+    float baseSpeed = maxSpeed;
+    float left = baseSpeed + control * steerGain;
+    float right = baseSpeed - control * steerGain;
+    motorSetPWM(left, right);
+  }
+}
