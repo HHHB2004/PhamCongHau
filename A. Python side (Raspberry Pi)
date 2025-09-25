@@ -1,0 +1,21 @@
+# loop: capture frame, compute e_lateral, send via serial
+import serial, time
+ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)
+cap = cv2.VideoCapture(0)
+
+while True:
+    ret, frame = cap.read()
+    if not ret: break
+    res = compute_line_error(frame)
+    if res is None:
+        ser.write(b"LOST\n")
+    else:
+        # send normalized error as float text
+        e = res['e_lateral']
+        out = f"E:{e:.3f}\n".encode('ascii')
+        ser.write(out)
+    # visualization optional
+    cv2.imshow('roi', res['binary'])
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+cap.release()
