@@ -1,0 +1,86 @@
+// speed_pid.ino -- single motor PID (inner loop)
+#include <Arduino.h>
+volatile long encCount = 0;
+void isr_enc(){ encCount++; } // attach to encoder A rising
+
+// PARAMETERS (tune these)
+float Kp = 1.0;
+float Ki = 0.2;
+float Kd = 0.01;
+float alphaD = 0.75;
+float Imin = -200.0, Imax = 200.0;
+float beta = 0.1; // back-calculation factor
+float Ts = 0.01; // 10 ms
+
+// STATE
+float Iterm = 0.0;
+float prev_e = 0.0;
+float prevD = 0.0;
+int prevEnc = 0;
+
+// SPEED SCALING (measure these first)
+const float maxCountsPerSec = 500.0; // set after measurement
+const int PWM_PIN = 5;
+const int DIR_PIN = 7;
+
+void setup(){
+  Serial.begin(115200);
+  pinMode(PWM_PIN, OUTPUT);
+  pinMode(DIR_PIN, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(2), isr_enc, RISING); // example
+}
+
+float countsToNormSpeed(long dcounts, float dt){
+  float cps = dcounts / dt;
+  float s = cps / maxCountsPerSec;
+  if (s>1) s=1;
+  if (s<-1) s=-1;
+  return s;
+}
+
+float pid_compute(float setS, float measS){
+  float e = setS - measS;
+  float P = Kp * e;
+  Iterm += Ki * Ts * e;
+  // clamp integral
+  if (Iterm > Imax) Iterm = Imax;
+  if (Iterm < Imin) Iterm = Imin;
+  float rawD = (e - prev_e) / Ts;
+  float D = alphaD * prevD + (1.0 - alphaD) * rawD;
+  float u = P + Iterm + Kd * D;
+  // saturation to PWM range
+  float u_sat = u;
+  if (u > 1.0) u_sat = 1.0;
+  if (u < -1.0) u_sat = -1.0;
+  // anti-windup back-calculation
+  float diff = u - u_sat;
+  Iterm -= beta * diff;
+  prev_e = e;
+  prevD = D;
+  return u_sat;
+}
+
+unsigned long lastMs = 0;
+void loop(){
+  unsigned long now = millis();
+  if (now - lastMs >= (unsigned long)(Ts*1000)){
+    lastMs = now;
+    // compute measured speed
+    int curEnc = encCount;
+    int d = curEnc - prevEnc; prevEnc = curEnc;
+    float dt = Ts;
+    float meas = countsToNormSpeed(d, dt); // normalized speed -1..1
+    float setpoint = 0.5; // example target normalized speed
+    float u = pid_compute(setpoint, meas); // u in -1..1
+    // map to PWM
+    int pwm = (int)(abs(u)*255.0);
+    if (pwm > 255) pwm = 255;
+    if (u >= 0) digitalWrite(DIR_PIN, HIGH);
+    else digitalWrite(DIR_PIN, LOW);
+    analogWrite(PWM_PIN, pwm);
+    // Optional: print log
+    Serial.print("sp:"); Serial.print(setpoint,3);
+    Serial.print(" meas:"); Serial.print(meas,3);
+    Serial.print(" u:"); Serial.println(u,3);
+  }
+}
